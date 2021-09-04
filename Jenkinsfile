@@ -2,72 +2,60 @@ pipeline {
     agent any
     tools {
         maven 'maven3.8'
-        jdk 'jdk8'
+        jdk 'jdk'
     }
     environment { 
-        AWS_REGION = 'us-east-1'
-        ECRREGISTRY = '464599248654.dkr.ecr.us-east-1.amazonaws.com'
-        IMAGENAME = 'demomk'
+        AWS_REGION = 'us-west-2'
+        ECRREGISTRY = '735972722491.dkr.ecr.us-west-2.amazonaws.com'
+        IMAGENAME = 'haplet-registory'
         IMAGE_TAG = 'latest'
     }
     stages {
-       stage ('Clone') {
+       stage ('Cloning git & Build') {
           steps {
                 checkout scm
             }
         }
-
-        stage('Compile') {
+         stage('Compile') {
             steps {
                 sh 'mvn clean package -DskipTests=true'
             }
         }
-        stage('Unit Tests') {
+         stage('Unit Tests Execution') {
             steps {
                 sh 'mvn surefire:test'
             }
         }
-        stage("build & SonarQube analysis") {
+         stage("Static Code analysis With SonarQube") {
             agent any
             steps {
-              withSonarQubeEnv('sonarserver') {
-                sh 'mvn clean package sonar:sonar'
+              withSonarQubeEnv('sonnar-scanner') {
+                sh "mvn clean package sonar:sonar -Dsonar.host.url=http://34.212.134.62:9000 -Dsonar.login=cc92b9fece4552a752667e25ff8a1064f7447e3d -Dsonar.projectKey=jenkins -Dsonar.projectName=haplet -Dsonar.projectVersion=1.0"
               }
             }
           }
-
-         stage('Deployment Approval') {
+        stage('docker build and Tag Application') {
+            steps {
+                 sh 'cp ./webapp/target/webapp.war .'
+                 sh 'docker build -t ${IMAGENAME} .'
+                 sh 'docker tag ${IMAGENAME}:${IMAGE_TAG} ${ECRREGISTRY}/${IMAGENAME}:${IMAGE_TAG}'
+            }
+        }
+        stage('Deployment Approval') {
             steps {
               script {
-                timeout(time: 10, unit: 'MINUTES') {
+                timeout(time: 20, unit: 'MINUTES') {
                  input(id: 'Deploy Gate', message: 'Deploy Application to Dev ?', ok: 'Deploy')
                  }
                }
             }
-         }   
-        
-         stage('AWS ecr login') {
-            steps {
-                sh 'aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECRREGISTRY}'
-            }
-        }        
-         stage('docker build and tag') {
-            steps {
-                sh 'docker build -t ${IMAGENAME}:${IMAGE_TAG} .'
-                sh 'docker tag ${IMAGENAME}:${IMAGE_TAG} ${ECRREGISTRY}/${IMAGENAME}:${IMAGE_TAG}'
-            }
-        }  
-         stage('docker push') {
+        } 
+         // For non-release candidates, This can be as simple as tagging the artifact(s) with a timestamp and the build number of the job performing the CI/CD process.
+         stage('Publish the Artifact to ECR') {
             steps {
                 sh 'docker push ${ECRREGISTRY}/${IMAGENAME}:${IMAGE_TAG}'
+                sh 'docker rmi ${ECRREGISTRY}/${IMAGENAME}:${IMAGE_TAG}'
             }
-        }                
-        
-    }
-    post {
-        always {
-            junit 'target/surefire-reports/TEST-*.xml'
-            deleteDir()
+        }       
         }
-    }
 }
